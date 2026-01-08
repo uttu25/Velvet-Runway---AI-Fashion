@@ -32,15 +32,23 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
   throw lastError;
 }
 
+/**
+ * AI Agent: Daily Planning Identity Service
+ * Generates 20 distinct model personas for the day.
+ */
 export const generateDailyIdentities = async (count: number = 20): Promise<Array<{name: string, description: string, traits: string}>> => {
   return callWithRetry(async () => {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Generate ${count} elite high-fashion model personas for a professional digital runway. 
-      Focus on sophisticated editorial descriptions and diverse high-fashion traits. 
-      Models should be strikingly attractive Caucasian women in an artistic fashion context. 
-      Return JSON array with 'name', 'description' (luxury bio), and 'traits' (physical traits like hair/eyes).`,
+      contents: `You are the lead casting director for Velvet Runway. 
+      Draft ${count} high-fashion female model personas for today's digital showcase.
+      Each persona must have: 
+      1. A professional model name.
+      2. A luxury editorial bio.
+      3. Precise physical traits (hair style/color, eye color, unique facial features) to ensure consistent AI generation.
+      Models should be Caucasian, stunningly attractive, and fit for haute couture.
+      Return as a JSON array of objects with keys: 'name', 'description', 'traits'.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -61,9 +69,13 @@ export const generateDailyIdentities = async (count: number = 20): Promise<Array
   });
 };
 
+/**
+ * Image Generation Agent
+ */
 const generateImage = async (prompt: string, referenceImage?: string): Promise<string> => {
   const ai = getAiClient();
   const contents: any = { parts: [{ text: prompt }] };
+  
   if (referenceImage) {
     contents.parts.push({
       inlineData: {
@@ -76,7 +88,11 @@ const generateImage = async (prompt: string, referenceImage?: string): Promise<s
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-image",
     contents: contents,
-    config: { imageConfig: { aspectRatio: "3:4" } }
+    config: { 
+      imageConfig: { 
+        aspectRatio: "3:4"
+      } 
+    }
   });
 
   const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
@@ -84,24 +100,30 @@ const generateImage = async (prompt: string, referenceImage?: string): Promise<s
   return `data:image/png;base64,${part.inlineData.data}`;
 };
 
+/**
+ * AI Manager: Triple-Stage Orchestration
+ * Automates the generation of 3 stages for a single identity while maintaining visual consistency.
+ */
 export const orchestrateModelStages = async (
   identity: { name: string, description: string, traits: string },
-  onStageGenerated: (stage: RevealStage, url: string) => void
+  onProgress: (stage: RevealStage) => void
 ): Promise<Record<RevealStage, string>> => {
   const stages: Record<number, string> = {};
 
-  // PURELY ARTISTIC/FASHION FOCUSED PROMPTS FOR ADSENSE COMPLIANCE
-  const p0 = `Artistic high-fashion photography. A stunning Caucasian model, ${identity.traits}. Wearing an intricate avant-garde luxury designer gown, cinematic runway lighting, high-fashion editorial style. ${identity.description}. Highly detailed skin and fabric textures.`;
+  // Stage 0: The Hook (Editorial Gown)
+  const p0 = `HIGH-FASHION EDITORIAL: Full body photo of a stunning model, ${identity.traits}. Wearing an intricate, avant-garde designer gown. Elegant runway setting with cinematic luxury lighting. ${identity.description}. 8k resolution, professional photography.`;
   stages[RevealStage.FullyClothed] = await callWithRetry(() => generateImage(p0));
-  onStageGenerated(RevealStage.FullyClothed, stages[RevealStage.FullyClothed]);
+  onProgress(RevealStage.FullyClothed);
 
-  const p1 = `Editorial fashion edit: Transform outfit to a provocative yet artistic luxury summer collection—silk sheer-inspired blouse and designer shorts. Maintain identical model identity, ${identity.traits}, and high-fashion lighting. Purely artistic portrayal.`;
+  // Stage 1: The Transition (Summer Look)
+  const p1 = `STYLING CHANGE: Change the outfit to a provocative yet artistic luxury summer collection (sheer silk blouse and shorts). MAINTAIN IDENTICAL FACE, HAIR, AND IDENTITY from the provided image. Same model, ${identity.traits}. Same high-fashion atmosphere.`;
   stages[RevealStage.SummerOutfit] = await callWithRetry(() => generateImage(p1, stages[RevealStage.FullyClothed]));
-  onStageGenerated(RevealStage.SummerOutfit, stages[RevealStage.SummerOutfit]);
+  onProgress(RevealStage.SummerOutfit);
 
-  const p2 = `Artistic swimwear editorial: Transform outfit to a high-fashion designer bikini. Exotic high-end resort setting. Focus on artistic lighting and luxury styling. Maintain identical face, ${identity.traits}, and editorial quality. 100% professional fashion photography.`;
+  // Stage 2: The Final Reveal (Luxury Bikini)
+  const p2 = `SWIMWEAR EDITORIAL: Change the outfit to a minimalist luxury string bikini. MAINTAIN IDENTICAL FACE, HAIR, AND IDENTITY of the model. Resort setting. Artistic and professional high-fashion photography. Model traits: ${identity.traits}.`;
   stages[RevealStage.Bikini] = await callWithRetry(() => generateImage(p2, stages[RevealStage.SummerOutfit]));
-  onStageGenerated(RevealStage.Bikini, stages[RevealStage.Bikini]);
+  onProgress(RevealStage.Bikini);
 
   return stages as Record<RevealStage, string>;
 };
