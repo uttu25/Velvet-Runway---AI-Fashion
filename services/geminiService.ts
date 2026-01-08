@@ -4,14 +4,15 @@ import { RevealStage } from "../types";
 const getAiClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("API Key configuration missing.");
+    // This error is caught internally and never shown directly to users in a raw state
+    throw new Error("Configuration Unavailable");
   }
   return new GoogleGenAI({ apiKey });
 };
 
 /**
  * Robust retry wrapper for API calls with exponential backoff.
- * Specifically handles 429 (Rate Limit) and quota errors.
+ * Sanitizes errors to prevent any potential leakage of environment details.
  */
 async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: any;
@@ -20,19 +21,23 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
       return await fn();
     } catch (error: any) {
       lastError = error;
-      const errorStr = typeof error === 'string' ? error : (error.message || JSON.stringify(error));
-      const isRateLimit = errorStr.includes("429") || errorStr.includes("RESOURCE_EXHAUSTED") || errorStr.includes("quota");
+      
+      // Sanitize the error message immediately to prevent any key leakage in technical traces
+      const rawMessage = error?.message || "Internal error";
+      const isRateLimit = rawMessage.includes("429") || rawMessage.includes("RESOURCE_EXHAUSTED") || rawMessage.includes("quota");
+      const isSafety = rawMessage.includes("Safety") || rawMessage.includes("blocked");
       
       if (isRateLimit && i < maxRetries - 1) {
-        // Exponential backoff: 2s, 4s, 8s... + jitter
         const waitTime = Math.pow(2, i) * 2000 + Math.random() * 1000;
-        console.warn(`Rate limit or quota hit. Attempt ${i + 1}/${maxRetries}. Retrying in ${Math.round(waitTime)}ms...`);
+        console.warn(`Request deferred. Retrying in ${Math.round(waitTime)}ms...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
       
-      // If not a rate limit, or we're out of retries, throw
-      throw new Error(errorStr);
+      // Map technical errors to user-safe strings before re-throwing
+      if (isRateLimit) throw new Error("QUOTA_EXHAUSTED");
+      if (isSafety) throw new Error("SAFETY_FILTER");
+      throw new Error("SERVICE_UNAVAILABLE");
     }
   }
   throw lastError;
@@ -71,7 +76,6 @@ export const generateModelIdentity = async (): Promise<{name: string, descriptio
     const data = JSON.parse(text);
     return { ...data, traits: randomTraits };
   }).catch(() => {
-    // Ultimate fallback if identity fails after all retries
     const names = ["Saskia", "Alessandra", "Valentina", "Zaira", "Noemi", "Bianca", "Giselle", "Clara"];
     return { 
       name: names[Math.floor(Math.random() * names.length)] + " " + Math.floor(Math.random() * 100), 
@@ -111,7 +115,7 @@ const attemptImageAction = async (prompt: string, imageBase64?: string): Promise
 
   const candidate = response.candidates?.[0];
   if (!candidate || !candidate.content || !candidate.content.parts) {
-    throw new Error("Safety Filter or Empty Response");
+    throw new Error("SAFETY_FILTER");
   }
 
   for (const part of candidate.content.parts) {
@@ -119,7 +123,7 @@ const attemptImageAction = async (prompt: string, imageBase64?: string): Promise
       return `data:image/png;base64,${part.inlineData.data}`;
     }
   }
-  throw new Error("No image data found in response");
+  throw new Error("SERVICE_UNAVAILABLE");
 };
 
 export const generateInitialModelImage = async (
@@ -137,9 +141,7 @@ export const generateInitialModelImage = async (
     try {
       return await attemptImageAction(boldPrompt);
     } catch (error: any) {
-      // If it's a safety filter error (not a 429), try fallback immediately within the attempt
-      if (error.message?.includes("Safety")) {
-        console.warn("Safety filter hit on bold prompt, trying fallback...");
+      if (error.message === "SAFETY_FILTER") {
         return await attemptImageAction(fallbackPrompt);
       }
       throw error;
@@ -178,8 +180,7 @@ export const transformModelOutfit = async (
     try {
       return await attemptImageAction(primaryPrompt, currentImageBase64);
     } catch (error: any) {
-      if (error.message?.includes("Safety")) {
-        console.warn("Transformation safety filter hit, trying fallback...");
+      if (error.message === "SAFETY_FILTER") {
         return await attemptImageAction(fallbackPrompt, currentImageBase64);
       }
       throw error;
