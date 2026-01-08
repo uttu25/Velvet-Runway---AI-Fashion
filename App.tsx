@@ -3,23 +3,27 @@ import { ModelCard } from './components/ModelCard';
 import { ModelProfile, RevealStage } from './types';
 import { generateDailyIdentities, orchestrateModelStages } from './services/geminiService';
 import { LegalModals } from './components/LegalModals';
+import { TrendsPage } from './components/TrendsPage';
+import { AgencyPage } from './components/AgencyPage';
 
 const CACHE_KEY = 'velvet_runway_collection_v2';
 const CACHE_DATE_KEY = 'velvet_runway_last_update_v2';
 const COOKIE_CONSENT_KEY = 'velvet_runway_cookie_consent';
 
-const AdSlot: React.FC<{ className?: string; type?: 'horizontal' | 'vertical' | 'square' }> = ({ className, type = 'square' }) => (
-  <div className={`bg-neutral-900 border border-white/5 flex flex-col items-center justify-center p-4 overflow-hidden relative group ${className}`}>
-    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-    <span className="text-[10px] text-neutral-600 font-bold uppercase tracking-widest mb-2">Advertisement</span>
-    <div className={`border-2 border-dashed border-neutral-800 rounded flex items-center justify-center w-full h-full text-neutral-700 text-xs text-center p-2`}>
-      {type === 'horizontal' ? 'Leaderboard 728x90' : type === 'vertical' ? 'Skyscraper 160x600' : 'Responsive Square'}
+type ViewState = 'runway' | 'trends' | 'agency';
+
+export const AdSlot: React.FC<{ className?: string; type?: 'horizontal' | 'vertical' | 'square' }> = ({ className, type = 'square' }) => (
+  <div className={`bg-neutral-900/40 border border-white/5 flex flex-col items-center justify-center p-4 overflow-hidden relative group rounded-xl ${className}`}>
+    <div className="absolute inset-0 bg-gradient-to-br from-[#d4af37]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+    <span className="text-[9px] text-neutral-600 font-bold uppercase tracking-[0.3em] mb-3">Promoted Gallery</span>
+    <div className="border border-dashed border-neutral-800 rounded-lg flex items-center justify-center w-full h-full text-neutral-700 text-[10px] text-center p-4 font-mono">
+      ADSENSE_DYNAMIC_SLOT_{type.toUpperCase()}
     </div>
-    {/* Real AdSense Implementation code would go here */}
   </div>
 );
 
 const App: React.FC = () => {
+  const [currentView, setCurrentView] = useState<ViewState>('runway');
   const [models, setModels] = useState<ModelProfile[]>([]);
   const [isOrchestrating, setIsOrchestrating] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -43,7 +47,7 @@ const App: React.FC = () => {
         setStatusMessage(`Styling Model ${i + 1} of 20...`);
         try {
           const modelId = Math.random().toString(36).substring(7);
-          const allStages = await orchestrateModelStages(id, (stage, url) => {});
+          const allStages = await orchestrateModelStages(id, () => {});
           const newModel: ModelProfile = {
             id: modelId,
             name: id.name,
@@ -58,13 +62,13 @@ const App: React.FC = () => {
           localStorage.setItem(CACHE_KEY, JSON.stringify(completedModels));
           localStorage.setItem(CACHE_DATE_KEY, new Date().toDateString());
         } catch (err) {
-          console.warn(`Model ${i+1} skip.`, err);
+          console.warn(`Model ${i+1} failed orchestration.`, err);
         }
         setProgress(Math.round(((i + 1) / identities.length) * 100));
       }
       setStatusMessage("Daily Runway Synchronized.");
     } catch (e) {
-      setStatusMessage("Agency Busy. Retrying...");
+      setStatusMessage("System Overload. Retrying soon...");
     } finally {
       setIsOrchestrating(false);
     }
@@ -78,13 +82,13 @@ const App: React.FC = () => {
 
     if (cachedModels && lastUpdate === today) {
       setModels(JSON.parse(cachedModels));
-      setStatusMessage("Collection Verified & Ready.");
+      setStatusMessage("Agency Online: Collection Verified.");
     } else {
       startAgencyManager();
     }
 
     if (!hasConsented) {
-      setTimeout(() => setShowCookieConsent(true), 2000);
+      setTimeout(() => setShowCookieConsent(true), 1500);
     }
   }, []);
 
@@ -101,30 +105,76 @@ const App: React.FC = () => {
     });
   };
 
+  const renderContent = () => {
+    switch (currentView) {
+      case 'trends':
+        return <TrendsPage />;
+      case 'agency':
+        return <AgencyPage />;
+      default:
+        return (
+          <div className="animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-10">
+              {models.map((model, idx) => (
+                <React.Fragment key={model.id}>
+                  {idx > 0 && idx % 8 === 0 && (
+                    <div className="hidden lg:block">
+                      <AdSlot className="h-full min-h-[450px]" type="vertical" />
+                    </div>
+                  )}
+                  <ModelCard model={model} onUpdate={updateModel} />
+                </React.Fragment>
+              ))}
+              
+              {isOrchestrating && models.length < 20 && (
+                <div className="w-full aspect-[3/4] bg-neutral-900/20 rounded-2xl border border-white/5 flex flex-col items-center justify-center p-8 text-center">
+                    <div className="w-10 h-10 border-2 border-[#d4af37]/20 border-t-[#d4af37] rounded-full animate-spin mb-4"></div>
+                    <p className="text-[10px] text-neutral-500 uppercase tracking-[0.2em] font-bold">Curating Showcase...</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#020202] text-[#f0f0f0] flex flex-col selection:bg-[#d4af37] selection:text-black">
-      <AdSlot type="horizontal" className="h-24 w-full border-b border-white/5 bg-black" />
+      {/* Top Banner Ad */}
+      <AdSlot type="horizontal" className="h-24 w-full border-b border-white/5 bg-black rounded-none" />
 
-      <header className="sticky top-0 z-50 bg-[#020202]/90 backdrop-blur-xl border-b border-[#d4af37]/20">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center">
-          <div className="flex items-center gap-4 mb-4 md:mb-0 cursor-pointer" onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}>
-            <div className="w-12 h-12 bg-gradient-to-tr from-[#d4af37] to-[#b8860b] rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)]">
-              <span className="font-bold text-2xl serif text-black">V</span>
+      <header className="sticky top-0 z-50 bg-[#020202]/95 backdrop-blur-xl border-b border-[#d4af37]/20">
+        <div className="max-w-[1800px] mx-auto px-6 py-5 flex flex-col md:flex-row justify-between items-center">
+          <div 
+            className="flex items-center gap-5 mb-6 md:mb-0 cursor-pointer group" 
+            onClick={() => { setCurrentView('runway'); window.scrollTo({top: 0, behavior: 'smooth'}); }}
+          >
+            <div className="w-14 h-14 bg-gradient-to-tr from-[#d4af37] to-[#b8860b] rounded-full flex items-center justify-center shadow-[0_0_25px_rgba(212,175,55,0.3)] group-hover:scale-110 transition-transform duration-500">
+              <span className="font-bold text-3xl serif text-black">V</span>
             </div>
             <div>
-              <h1 className="text-2xl font-bold serif leading-none gold-glow uppercase tracking-tighter">Velvet Runway</h1>
-              <p className="text-[8px] text-neutral-500 tracking-[0.3em] font-bold uppercase mt-1">{statusMessage}</p>
+              <h1 className="text-3xl font-bold serif leading-none gold-glow uppercase tracking-tighter">Velvet Runway</h1>
+              <p className="text-[9px] text-neutral-500 tracking-[0.3em] font-bold uppercase mt-1.5">{statusMessage}</p>
             </div>
           </div>
 
-          <nav className="flex items-center gap-8">
-            {['about', 'privacy', 'contact'].map((item) => (
+          <nav className="flex items-center gap-10">
+            {[
+              { id: 'runway', label: 'The Runway' },
+              { id: 'trends', label: 'Trend Report' },
+              { id: 'agency', label: 'The Agency' }
+            ].map((item) => (
               <button 
-                key={item}
-                onClick={() => setLegalModal(item as any)}
-                className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:text-[#d4af37] transition-colors"
+                key={item.id}
+                onClick={() => { setCurrentView(item.id as ViewState); window.scrollTo({top: 0, behavior: 'smooth'}); }}
+                className={`text-[11px] font-bold uppercase tracking-[0.25em] transition-all duration-300 relative py-2 ${
+                  currentView === item.id ? 'text-[#d4af37]' : 'text-neutral-400 hover:text-white'
+                }`}
               >
-                {item}
+                {item.label}
+                {currentView === item.id && (
+                  <span className="absolute bottom-0 left-0 w-full h-0.5 bg-[#d4af37] shadow-[0_0_8px_#d4af37]"></span>
+                )}
               </button>
             ))}
           </nav>
@@ -132,94 +182,91 @@ const App: React.FC = () => {
       </header>
 
       {isOrchestrating && (
-        <div className="w-full h-1 bg-neutral-900">
+        <div className="w-full h-[1px] bg-neutral-900">
           <div 
-            className="h-full bg-gradient-to-r from-[#d4af37] to-[#b8860b] shadow-[0_0_10px_#d4af37] transition-all duration-1000" 
+            className="h-full bg-gradient-to-r from-[#d4af37] via-white to-[#b8860b] shadow-[0_0_10px_#d4af37] transition-all duration-1000" 
             style={{ width: `${progress}%` }}
           />
         </div>
       )}
 
-      <main className="max-w-[1700px] mx-auto px-6 py-12 flex-grow">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-10">
-          {models.map((model, idx) => (
-            <React.Fragment key={model.id}>
-              {idx > 0 && idx % 8 === 0 && (
-                <div className="hidden lg:block">
-                  <AdSlot className="rounded-2xl h-full min-h-[450px]" type="vertical" />
-                </div>
-              )}
-              <ModelCard model={model} onUpdate={updateModel} />
-            </React.Fragment>
-          ))}
-          
-          {isOrchestrating && models.length < 20 && (
-             <div className="w-full aspect-[3/4] bg-neutral-900/30 rounded-2xl border border-white/5 flex flex-col items-center justify-center p-8 text-center">
-                <div className="w-8 h-8 border-2 border-[#d4af37]/20 border-t-[#d4af37] rounded-full animate-spin mb-4"></div>
-                <p className="text-[10px] text-neutral-500 uppercase tracking-widest leading-relaxed">Agent is curating today's lineup...</p>
-             </div>
-          )}
-        </div>
+      <main className="max-w-[1700px] mx-auto px-6 py-16 flex-grow w-full">
+        {renderContent()}
       </main>
 
-      {/* Footer Monetization */}
+      {/* Persistent Bottom Monetization */}
       <div className="sticky bottom-0 z-40 w-full bg-[#050505]/95 backdrop-blur-md border-t border-white/5 p-2">
-        <div className="max-w-4xl mx-auto h-24">
+        <div className="max-w-5xl mx-auto h-24">
           <AdSlot type="horizontal" className="h-full border-none bg-transparent" />
         </div>
       </div>
 
-      <footer className="bg-black py-16 px-6 border-t border-white/5">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12 text-center md:text-left">
-          <div className="space-y-4">
-            <h4 className="serif text-[#d4af37] text-xl">Velvet Runway</h4>
-            <p className="text-neutral-500 text-xs leading-relaxed max-w-xs mx-auto md:mx-0">
-              The world's first fully automated AI high-fashion agency. Daily collections curated by neural agents for the modern elite.
+      <footer className="bg-black py-20 px-8 border-t border-white/5">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-16 text-center md:text-left">
+          <div className="space-y-6 col-span-1 md:col-span-1">
+            <h4 className="serif text-[#d4af37] text-2xl font-bold">Velvet Runway</h4>
+            <p className="text-neutral-500 text-xs leading-relaxed">
+              The premier AI-curated digital fashion house. Revolutionizing haute couture through high-fidelity neural imagery and automated global trend analysis.
             </p>
           </div>
-          <div className="flex flex-col gap-3">
-            <h5 className="text-[10px] font-bold text-white uppercase tracking-widest mb-2">Legal Docs</h5>
-            <button onClick={() => setLegalModal('privacy')} className="text-neutral-500 hover:text-white text-xs transition-colors">Privacy Policy</button>
-            <button onClick={() => setLegalModal('terms')} className="text-neutral-500 hover:text-white text-xs transition-colors">Terms of Service</button>
-            <button onClick={() => setLegalModal('contact')} className="text-neutral-500 hover:text-white text-xs transition-colors">DMCA Notice</button>
+          
+          <div className="flex flex-col gap-4">
+            <h5 className="text-[10px] font-bold text-white uppercase tracking-widest mb-2 text-[#d4af37]">Explore</h5>
+            <button onClick={() => setCurrentView('runway')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">Daily Collection</button>
+            <button onClick={() => setCurrentView('trends')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">Trend Analysis</button>
+            <button onClick={() => setLegalModal('about')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">Our Mission</button>
           </div>
-          <div className="space-y-4">
-            <h5 className="text-[10px] font-bold text-white uppercase tracking-widest mb-2">Certified Content</h5>
+
+          <div className="flex flex-col gap-4">
+            <h5 className="text-[10px] font-bold text-white uppercase tracking-widest mb-2 text-[#d4af37]">Legal Documents</h5>
+            <button onClick={() => setLegalModal('privacy')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">Privacy & Cookies</button>
+            <button onClick={() => setLegalModal('terms')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">Terms of Service</button>
+            <button onClick={() => setLegalModal('contact')} className="text-neutral-500 hover:text-white text-xs transition-colors text-left">DMCA & Compliance</button>
+          </div>
+
+          <div className="space-y-6">
+            <h5 className="text-[10px] font-bold text-white uppercase tracking-widest mb-2 text-[#d4af37]">Verification</h5>
             <p className="text-neutral-600 text-[10px] leading-relaxed">
-              All images are 100% AI-generated. 18+ Verification required. AdSense Compliant & Secure.
+              Velvet Runway uses Google Gemini 2.5 series models. Content is generated for artistic and editorial purposes. 18+ Access Only.
             </p>
-            <div className="flex justify-center md:justify-start gap-4">
-               <div className="w-8 h-8 rounded border border-white/10 flex items-center justify-center text-[10px] text-neutral-600">SSL</div>
-               <div className="w-8 h-8 rounded border border-white/10 flex items-center justify-center text-[10px] text-neutral-600">AI</div>
+            <div className="flex justify-center md:justify-start gap-3">
+               <div className="px-3 py-1.5 rounded border border-white/10 text-[9px] text-neutral-500 uppercase font-bold">Secure SSL</div>
+               <div className="px-3 py-1.5 rounded border border-white/10 text-[9px] text-neutral-500 uppercase font-bold">AI Native</div>
             </div>
           </div>
         </div>
-        <div className="mt-16 pt-8 border-t border-white/5 text-center">
+        
+        <div className="mt-20 pt-10 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-6">
           <p className="text-neutral-700 text-[9px] tracking-[0.5em] uppercase font-bold">
-            &copy; {new Date().getFullYear()} VELVET RUNWAY AGENCY &bull; ALL RIGHTS RESERVED
+            &copy; {new Date().getFullYear()} VELVET RUNWAY AGENCY &bull; GLOBAL DIGITAL HOUSE
           </p>
+          <div className="flex gap-8">
+            <span className="text-neutral-800 text-[9px] uppercase tracking-widest">Paris</span>
+            <span className="text-neutral-800 text-[9px] uppercase tracking-widest">Milan</span>
+            <span className="text-neutral-800 text-[9px] uppercase tracking-widest">Tokyo</span>
+            <span className="text-neutral-800 text-[9px] uppercase tracking-widest">New York</span>
+          </div>
         </div>
       </footer>
 
-      {/* Cookie Consent Banner */}
       {showCookieConsent && (
-        <div className="fixed bottom-28 left-6 right-6 md:left-auto md:right-8 md:w-96 z-[60] bg-[#111] border border-[#d4af37]/40 rounded-xl p-6 shadow-2xl animate-in slide-in-from-bottom-full duration-500">
-          <h4 className="text-[#d4af37] font-bold text-sm mb-2 uppercase tracking-wide">Cookie Preferences</h4>
-          <p className="text-neutral-400 text-xs mb-4 leading-relaxed">
-            We use cookies to improve your experience and serve relevant ads via Google AdSense. By continuing, you agree to our <button onClick={() => setLegalModal('privacy')} className="underline">Privacy Policy</button>.
+        <div className="fixed bottom-28 left-6 right-6 md:left-auto md:right-8 md:w-[400px] z-[60] bg-[#111] border border-[#d4af37]/30 rounded-2xl p-8 shadow-[0_20px_60px_rgba(0,0,0,0.8)] animate-in slide-in-from-bottom-full duration-500">
+          <h4 className="text-[#d4af37] font-bold text-base mb-3 uppercase tracking-widest serif">Cookie Compliance</h4>
+          <p className="text-neutral-400 text-xs mb-6 leading-relaxed">
+            Velvet Runway uses cookies and similar technologies to personalize content and advertisements through Google AdSense. By continuing to browse, you agree to our data practices.
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-4">
             <button 
               onClick={handleConsent}
-              className="flex-1 bg-[#d4af37] text-black font-bold text-[10px] uppercase py-2.5 rounded hover:bg-white transition-all"
+              className="flex-1 bg-[#d4af37] text-black font-bold text-[10px] uppercase py-3 rounded-lg hover:bg-white transition-all shadow-lg"
             >
-              Accept All
+              Accept Selection
             </button>
             <button 
               onClick={handleConsent}
-              className="px-4 text-neutral-500 text-[10px] uppercase hover:text-white transition-all"
+              className="px-6 text-neutral-500 text-[10px] uppercase font-bold hover:text-white transition-all"
             >
-              Essential Only
+              Essential
             </button>
           </div>
         </div>
