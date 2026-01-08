@@ -1,19 +1,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { RevealStage } from "../types";
+import { RevealStage, ModelProfile } from "../types";
 
 const getAiClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    // This error is caught internally and never shown directly to users in a raw state
     throw new Error("Configuration Unavailable");
   }
   return new GoogleGenAI({ apiKey });
 };
 
-/**
- * Robust retry wrapper for API calls with exponential backoff.
- * Sanitizes errors to prevent any potential leakage of environment details.
- */
 async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
   let lastError: any;
   for (let i = 0; i < maxRetries; i++) {
@@ -21,20 +16,16 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
       return await fn();
     } catch (error: any) {
       lastError = error;
-      
-      // Sanitize the error message immediately to prevent any key leakage in technical traces
       const rawMessage = error?.message || "Internal error";
       const isRateLimit = rawMessage.includes("429") || rawMessage.includes("RESOURCE_EXHAUSTED") || rawMessage.includes("quota");
       const isSafety = rawMessage.includes("Safety") || rawMessage.includes("blocked");
       
       if (isRateLimit && i < maxRetries - 1) {
         const waitTime = Math.pow(2, i) * 2000 + Math.random() * 1000;
-        console.warn(`Request deferred. Retrying in ${Math.round(waitTime)}ms...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
       
-      // Map technical errors to user-safe strings before re-throwing
       if (isRateLimit) throw new Error("QUOTA_EXHAUSTED");
       if (isSafety) throw new Error("SAFETY_FILTER");
       throw new Error("SERVICE_UNAVAILABLE");
@@ -43,147 +34,83 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
   throw lastError;
 }
 
-export const generateModelIdentity = async (): Promise<{name: string, description: string, traits: string}> => {
+/**
+ * Generates 20 distinct model identities in a single batch to save planning tokens.
+ */
+export const generateDailyIdentities = async (count: number = 20): Promise<Array<{name: string, description: string, traits: string}>> => {
   return callWithRetry(async () => {
     const ai = getAiClient();
-    
-    const hairColors = ["platinum blonde", "warm honey blonde", "deep raven black", "vibrant auburn red", "ash brown", "strawberry blonde"];
-    const eyeColors = ["piercing crystal blue", "deep emerald green", "striking hazel", "misty grey"];
-    const facialStyles = ["sharp editorial features", "soft romantic beauty", "alluring gaze", "classic runway look"];
-    
-    const randomHair = hairColors[Math.floor(Math.random() * hairColors.length)];
-    const randomEye = eyeColors[Math.floor(Math.random() * eyeColors.length)];
-    const randomFace = facialStyles[Math.floor(Math.random() * facialStyles.length)];
-    const randomTraits = `${randomHair} hair, ${randomEye} eyes, ${randomFace}.`;
-
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Generate a stunningly attractive name and a sensual, captivating 1-sentence bio for a high-fashion female model. 
-      She is Caucasian. Focus on high-end allure and elite glamour. Return JSON.`,
+      contents: `Generate ${count} unique, high-fashion female model identities for today's elite runway. 
+      Models should be Caucasian, stunningly attractive, each with unique hair/eye colors and editorial traits.
+      Return as a JSON array of objects with 'name', 'description', and 'traits'.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            description: { type: Type.STRING }
-          },
-          propertyOrdering: ["name", "description"]
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              description: { type: Type.STRING },
+              traits: { type: Type.STRING, description: "Detailed physical traits like hair and eye color" }
+            },
+            required: ["name", "description", "traits"]
+          }
         }
       }
     });
-    const text = response.text?.trim() || "{}";
-    const data = JSON.parse(text);
-    return { ...data, traits: randomTraits };
-  }).catch(() => {
-    const names = ["Saskia", "Alessandra", "Valentina", "Zaira", "Noemi", "Bianca", "Giselle", "Clara"];
-    return { 
-      name: names[Math.floor(Math.random() * names.length)] + " " + Math.floor(Math.random() * 100), 
-      description: "An icon of modern allure and sophisticated high-fashion glamour.",
-      traits: "Striking features and honey-blonde hair."
-    };
+    return JSON.parse(response.text || "[]");
   });
 };
 
-const attemptImageAction = async (prompt: string, imageBase64?: string): Promise<string> => {
+const generateImage = async (prompt: string, referenceImage?: string): Promise<string> => {
   const ai = getAiClient();
-  const model = "gemini-2.5-flash-image";
-
-  const contents: any = {
-    parts: [{ text: prompt }]
-  };
-
-  if (imageBase64) {
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+  const contents: any = { parts: [{ text: prompt }] };
+  if (referenceImage) {
     contents.parts.push({
       inlineData: {
         mimeType: "image/png",
-        data: base64Data
+        data: referenceImage.replace(/^data:image\/\w+;base64,/, "")
       }
     });
   }
 
   const response = await ai.models.generateContent({
-    model: model,
+    model: "gemini-2.5-flash-image",
     contents: contents,
-    config: {
-      imageConfig: {
-        aspectRatio: "3:4"
-      }
-    }
+    config: { imageConfig: { aspectRatio: "3:4" } }
   });
 
-  const candidate = response.candidates?.[0];
-  if (!candidate || !candidate.content || !candidate.content.parts) {
-    throw new Error("SAFETY_FILTER");
-  }
-
-  for (const part of candidate.content.parts) {
-    if (part.inlineData) {
-      return `data:image/png;base64,${part.inlineData.data}`;
-    }
-  }
-  throw new Error("SERVICE_UNAVAILABLE");
+  const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+  if (!part?.inlineData) throw new Error("SAFETY_FILTER");
+  return `data:image/png;base64,${part.inlineData.data}`;
 };
 
-export const generateInitialModelImage = async (
-  description: string,
-  traits?: string
-): Promise<string> => {
-  const boldPrompt = `Provocative high-fashion photography, full length. A beautiful Caucasian model with ${traits || 'striking features'}. 
-  She is ${description}. Outfit: Daring designer look with luxury fabrics, plunging neckline, high-fashion silhouette. 
-  Seductive pose, cinematic lighting, ultra-detailed textures.`;
+/**
+ * The Agency Orchestrator: Pre-generates all 3 stages for a single model.
+ */
+export const orchestrateModelStages = async (
+  identity: { name: string, description: string, traits: string },
+  onStageGenerated: (stage: RevealStage, url: string) => void
+): Promise<Record<RevealStage, string>> => {
+  const stages: Record<number, string> = {};
 
-  const fallbackPrompt = `Editorial fashion portrait. A stunningly attractive Caucasian model with ${traits || 'striking features'}. 
-  Sophisticated figure-hugging designer clothing, high-fashion styling, dramatic lighting.`;
+  // Stage 0: Fully Clothed (Initial)
+  const p0 = `Full-length editorial high-fashion photo. Stunning Caucasian model, ${identity.traits}. Wearing an alluring luxury designer gown, plunging neckline. ${identity.description}. Cinematic lighting.`;
+  stages[RevealStage.FullyClothed] = await callWithRetry(() => generateImage(p0));
+  onStageGenerated(RevealStage.FullyClothed, stages[RevealStage.FullyClothed]);
 
-  return callWithRetry(async () => {
-    try {
-      return await attemptImageAction(boldPrompt);
-    } catch (error: any) {
-      if (error.message === "SAFETY_FILTER") {
-        return await attemptImageAction(fallbackPrompt);
-      }
-      throw error;
-    }
-  });
-};
+  // Stage 1: Summer Outfit (Progressive)
+  const p1 = `High-fashion edit: Change outfit to a provocative luxury summer look, sheer silk crop top and mini skirt. Keep the model's identity, face, and ${identity.traits} identical. Same pose.`;
+  stages[RevealStage.SummerOutfit] = await callWithRetry(() => generateImage(p1, stages[RevealStage.FullyClothed]));
+  onStageGenerated(RevealStage.SummerOutfit, stages[RevealStage.SummerOutfit]);
 
-export const transformModelOutfit = async (
-  currentImageBase64: string,
-  targetStage: RevealStage,
-  customPrompt?: string
-): Promise<string> => {
-  let primaryPrompt = "";
-  let fallbackPrompt = "";
+  // Stage 2: Bikini (Final)
+  const p2 = `High-fashion edit: Change outfit to a minimalist luxury high-cut string bikini. Beach setting. Keep model's face, identity, and ${identity.traits} identical.`;
+  stages[RevealStage.Bikini] = await callWithRetry(() => generateImage(p2, stages[RevealStage.SummerOutfit]));
+  onStageGenerated(RevealStage.Bikini, stages[RevealStage.Bikini]);
 
-  if (customPrompt) {
-    primaryPrompt = `Apply this high-fashion edit: ${customPrompt}. Keep the model's identity, face, and basic pose identical.`;
-    fallbackPrompt = `Gently apply this stylistic edit: ${customPrompt}. Maintain identical model features.`;
-  } else {
-    switch (targetStage) {
-      case RevealStage.SummerOutfit:
-        primaryPrompt = "Modify her outfit to a stunning designer summer look: a sheer-inspired luxury crop top and mini silk skirt. Alluring vibe, identical model features.";
-        fallbackPrompt = "High-fashion summer editorial change: luxury sleeveless top and mini skirt. Identical model.";
-        break;
-      case RevealStage.Bikini:
-        primaryPrompt = "Modify the outfit to a minimalist high-cut luxury designer bikini. Seductive swimwear editorial, beach setting, identical face and features.";
-        fallbackPrompt = "Transform into a luxury designer swimwear look. High-cut silhouette, exotic beach aesthetic, identical model.";
-        break;
-      default:
-        primaryPrompt = "Reset to original high-fashion luxury gown. Elegant and alluring, identical face.";
-        fallbackPrompt = "Classic editorial fashion styling, identical face.";
-    }
-  }
-
-  return callWithRetry(async () => {
-    try {
-      return await attemptImageAction(primaryPrompt, currentImageBase64);
-    } catch (error: any) {
-      if (error.message === "SAFETY_FILTER") {
-        return await attemptImageAction(fallbackPrompt, currentImageBase64);
-      }
-      throw error;
-    }
-  });
+  return stages as Record<RevealStage, string>;
 };
